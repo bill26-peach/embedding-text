@@ -1,7 +1,8 @@
 import threading
 from fastapi import FastAPI
 from checker.intent_api import router as checker_router
-from knowledge.query import router as knowledge_router
+from knowledge.search_vector import router as knowledge_router
+from knowledge.search_merge import router as search_merge_knowledge_router
 from model_api.llm_api import router as llm_router
 from knowledge.add import check_or_create_schema, consume_kafka_messages
 from contextlib import asynccontextmanager
@@ -28,6 +29,7 @@ app = FastAPI(lifespan=lifespan)
 # ✅ 挂载路由
 app.include_router(checker_router, prefix="/checker")
 app.include_router(knowledge_router, prefix="/knowledge")
+app.include_router(search_merge_knowledge_router, prefix="/knowledge")
 app.include_router(llm_router, prefix="/model")
 
 @app.get("/")

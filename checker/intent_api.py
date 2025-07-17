@@ -1,35 +1,61 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from .intent_checker import is_intent_match
+from .intent_checker import cosine_similarity
 from embedding_model.qwen3 import get_embedding
 import numpy as np
+import time
 
-# 创建 Router
 router = APIRouter()
 
-# 请求体模型
 class IntentRequest(BaseModel):
+    user_text: str       # 多个用逗号隔开
+    intent_text: str     # 多个用逗号隔开
+    threshold: float = 0.75
+
+class IntentMatchResult(BaseModel):
     user_text: str
     intent_text: str
-    threshold: float = 0.75  # 可选，默认 0.75
-
-# 返回模型
-class IntentResponse(BaseModel):
     match: bool
     similarity: float
+    duration_ms: float
+
+class IntentResponse(BaseModel):
+    total_ms: float
+    results: list[IntentMatchResult]
 
 @router.post("/check_intent", response_model=IntentResponse)
 def check_intent(req: IntentRequest):
-    emb1 = req.user_text
-    emb2 = req.intent_text
-    threshold = req.threshold
+    try:
+        user_list = [x.strip() for x in req.user_text.split(",") if x.strip()]
+        intent_list = [x.strip() for x in req.intent_text.split(",") if x.strip()]
 
-    # 内部调用相似度匹配
-    match = is_intent_match(emb1, emb2, threshold)
+        if len(user_list) != len(intent_list):
+            raise HTTPException(status_code=400, detail="user_text 和 intent_text 数量不一致")
 
-    # 重新计算相似度
-    v1 = get_embedding(emb1)
-    v2 = get_embedding(emb2)
-    sim = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+        results = []
+        start_total = time.time()
 
-    return IntentResponse(match=match, similarity=round(float(sim), 4))
+        for u, i in zip(user_list, intent_list):
+            start = time.time()
+
+            v1 = get_embedding(u)
+            v2 = get_embedding(i)
+            sim = cosine_similarity(v1, v2)
+            match = sim >= req.threshold
+
+            duration_ms = round((time.time() - start) * 1000, 2)
+
+            results.append(IntentMatchResult(
+                user_text=u,
+                intent_text=i,
+                match=match,
+                similarity=round(float(sim), 4),
+                duration_ms=duration_ms
+            ))
+
+        total_ms = round((time.time() - start_total) * 1000, 2)
+
+        return IntentResponse(total_ms=total_ms, results=results)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
