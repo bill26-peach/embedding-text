@@ -15,6 +15,7 @@ def last_token_pool(last_hidden_states: Tensor, attention_mask: Tensor) -> Tenso
 
 # ✅ 本地模型路径
 model_path = r"E:\model-al\model\Qwen3-Embedding-0.6B"  # ⬅️ 改成你的路径
+# model_path = r"E:\model-al\model\Qwen3-Embedding-8B"  # ⬅️ 改成你的路径
 tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side="left")
 model = AutoModel.from_pretrained(model_path)
 # 模型会被放到 GPU
