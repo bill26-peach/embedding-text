@@ -28,12 +28,14 @@ def split_text_to_paragraphs(text: str, max_len: int = 500) -> list[str]:
     return paragraphs
 
 def process_and_insert(paragraph: str, meta: dict, part_sort: int):
+    # 同一个文本id下的片段不需要再重复写入
     md5_value = md5_text(paragraph)
     file_id = meta.get("file_id")
     cache_key = f"paragraph_md5_cache:{file_id}"
 
     with cache_lock:
         if redis_client.sismember(cache_key, md5_value):
+            print(paragraph)
             print(f"🔁 已存在，file_id={file_id}, 跳过: {md5_value}")
             return
         redis_client.sadd(cache_key, md5_value)
@@ -46,6 +48,8 @@ def process_and_insert(paragraph: str, meta: dict, part_sort: int):
         "file_id": file_id,
         "userid": meta.get("userid"),
         "username": meta.get("username"),
+        "cont_source_chn": meta.get("nickname"),
+        "nickname": meta.get("nickname"),
         "digital_human_id": meta.get("digital_human_id"),
         "part_sort": part_sort,
         "part_cntt": paragraph
@@ -83,13 +87,21 @@ def consume_kafka_messages():
             msg_json = json.loads(msg.value().decode('utf-8'))
 
             meta = {
+                # 知识库ID暂时没有
                 "knowledge_id": msg_json.get("knowledge_id"),
-                "file_id": msg_json.get("file_id"),
+                "file_id": msg_json.get("id"),
+                # 用户id
                 "userid": msg_json.get("userid"),
+                # 用户名称
                 "username": msg_json.get("username"),
-                "digital_human_id": msg_json.get("digital_human_id")
+                # 昵称 微博、博客、论坛的用户昵称，必填(可用USERNAME填充)；新闻发布者(如果有)
+                "nickname": msg_json.get("nickname"),
+                # 数字人ID暂时没有
+                "digital_human_id": msg_json.get("digital_human_id"),
+                # 数据来源
+                "cont_source_chn": msg_json.get("cont_source_chn")
             }
-            content = msg_json.get("content", "")
+            content = msg_json.get("cntt", "")
 
             paragraphs = split_text_to_paragraphs(content)
 
@@ -124,6 +136,8 @@ def check_or_create_schema():
             {"name": "file_id", "dataType": ["string"]},
             {"name": "userid", "dataType": ["string"]},
             {"name": "username", "dataType": ["string"]},
+            {"name": "nickname", "dataType": ["string"]},
+            {"name": "cont_source_chn", "dataType": ["string"]},
             {"name": "digital_human_id", "dataType": ["string"]},
             {"name": "part_sort", "dataType": ["int"]},
             {"name": "part_cntt", "dataType": ["text"]},
