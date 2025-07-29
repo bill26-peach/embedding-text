@@ -1,0 +1,12 @@
+version: '3.9'
+
+services:
+  embedding-server:
+    image: bill73777/embedding-server
+    ports:
+      - "8888:8888"
+    volumes:
+      - E:\model-al\model:/models
+    env_file:
+      - .env
+    restart: always

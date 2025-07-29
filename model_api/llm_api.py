@@ -1,3 +1,5 @@
+import os
+from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -5,14 +7,17 @@ import torch
 
 router = APIRouter()
 
+# 加载 .env 文件
+load_dotenv()
+
 class LLMRequest(BaseModel):
     prompt: str
 
 # 模型初始化示例
-MODEL_PATH = r"E:\model\Qwen3-Embedding-0.6B"
+MODEL_PATH = os.getenv("MODEL_PATH", r"E:\model\Qwen3-Embedding-0.6B")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
-# model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, trust_remote_code=True).half().cuda()
-model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, trust_remote_code=True)
+model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, trust_remote_code=True).half().cuda()
+# model = AutoModelForCausalLM.from_pretrained(MODEL_PATH, trust_remote_code=True)
 model.eval()
 
 def generate_response(prompt: str) -> str:

@@ -1,10 +1,15 @@
+import os
+from dotenv import load_dotenv
 from transformers import AutoTokenizer, AutoModel
 import torch
 import torch.nn.functional as F
 import numpy as np
 
+# 加载 .env 文件
+load_dotenv()
+
 # ✅ 加载 BGE 模型
-model_name = r"E:\model-al\model\bge-large-zh-v1.5"
+model_name = os.getenv("BGE_MODEL_PATH", r"E:\model-al\model\bge-large-zh-v1.5")
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModel.from_pretrained(model_name)
 

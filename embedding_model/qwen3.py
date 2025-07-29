@@ -2,6 +2,8 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 from transformers import AutoTokenizer, AutoModel
+import os
+from dotenv import load_dotenv
 
 # ✅ 定义官方 recommended pooling
 def last_token_pool(last_hidden_states: Tensor, attention_mask: Tensor) -> Tensor:
@@ -13,13 +15,15 @@ def last_token_pool(last_hidden_states: Tensor, attention_mask: Tensor) -> Tenso
         batch_size = last_hidden_states.shape[0]
         return last_hidden_states[torch.arange(batch_size, device=last_hidden_states.device), sequence_lengths]
 
+# 加载 .env 文件
+load_dotenv()
 # ✅ 本地模型路径
-model_path = r"E:\model\Qwen3-Embedding-0.6B"  # ⬅️ 改成你的路径
+model_path = os.getenv("QWEN3_MODEL_PATH", r"E:\model\Qwen3-Embedding-0.6B")  # ⬅️ 改成你的路径
 # model_path = r"E:\model-al\model\Qwen3-Embedding-8B"  # ⬅️ 改成你的路径
 tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side="left")
-model = AutoModel.from_pretrained(model_path)
+# model = AutoModel.from_pretrained(model_path)
 # 模型会被放到 GPU
-# model = AutoModel.from_pretrained(model_path,torch_dtype=torch.float16).cuda()
+model = AutoModel.from_pretrained(model_path,torch_dtype=torch.float16).cuda()
 print(model.device)
 # ✅ 转换向量函数
 def get_embedding(text: str) -> list[float]:

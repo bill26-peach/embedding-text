@@ -2,7 +2,6 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from .intent_checker import cosine_similarity
 from embedding_model.qwen3 import get_embedding
-import numpy as np
 import time
 
 router = APIRouter()
