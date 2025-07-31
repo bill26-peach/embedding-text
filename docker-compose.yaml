@@ -6,7 +6,10 @@ services:
     ports:
       - "8888:8888"
     volumes:
-      - E:\model-al\model:/models
+      - /data/ai/models:/models
     env_file:
       - .env
     restart: always
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
