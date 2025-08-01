@@ -1,10 +1,61 @@
-from knowledge import client  # ✅ 从 knowledge/__init__.py 导入 Weaviate client
+import uuid
+import time
+from embedding_model.qwen3 import get_embedding
+from knowledge import client
 
-get = client.schema.get()
-# client.schema.delete_class("KnowledgeParagraph")
-full_result = (client.query.get("KnowledgeParagraph",
-                      ["part_id", "knowledge_id", "file_id", "userid", "username", "digital_human_id", "part_cntt",
-                       "part_sort"])
-                      .with_additional(["distance", "id","vector"]).do())
-print(get)
-print(full_result)
+client.schema.delete_class("KnowledgeParagraph")
+paragraphs = [
+    "股票市场的波动率与投资者情绪指数之间存在显著相关性。尤其在重大经济政策出台或突发事件发生时，情绪指标的极端波动往往预示着市场的大幅调整。",
+    "医院急诊量与季节性传染病的爆发频率之间具有正相关关系。冬季流感高发期间，呼吸系统相关的急诊病例显著增加，医疗资源压力随之上升。",
+    "设备维护频率与产品不良率之间呈负相关。通过提高预防性维护的执行效率，许多工厂显著降低了产线中的瑕疵率与返工成本。",
+    "促销活动频率与用户回购率之间存在正相关关系。当品牌在节假日或会员日提供优惠时，消费者更容易形成购买习惯，提升忠诚度。",
+    "网站加载速度与用户留存率之间有着明显相关性。页面加载超过3秒的网站，其用户跳出率平均高出快速网站约40%。",
+    "天气温度变化与电力负载之间存在直接相关性。夏季气温升高时，空调负载使得电力峰值迅速上升，电网面临更大调节压力。",
+    "配送路径优化程度与客户满意度之间存在显著正相关。通过智能调度算法降低配送时间，有效减少了因延迟带来的差评和退单率。",
+    "自适应学习系统中，推荐精准度与学生学习完成率之间存在正相关。当学习内容更贴合学生水平时，用户更容易坚持使用平台完成课程。",
+    "土壤湿度与农作物产量之间存在显著正相关性。在精细灌溉条件下，作物吸收养分更充分，从而实现更高的亩产量。",
+    "被保人年龄与理赔发生率之间存在正相关。年龄越大的人群在健康险和人寿险中发生理赔事件的概率也越高，因此保费定价需考虑风险评估模型。",
+    "股票市場的波動率與投資者情緒指數之間存在顯著相關性。尤其在重大經濟政策出台或突發事件發生時，情緒指標的極端波動往往預示著市場的大幅調整。",
+    "醫院急診量與季節性傳染病的爆發頻率之間具有正相關關係。冬季流感高發期間，呼吸系統相關的急診病例顯著增加，醫療資源壓力隨之上升。",
+    "設備維護頻率與產品不良率之間呈負相關。通過提高預防性維護的執行效率，許多工廠顯著降低了產線中的瑕疵率與返工成本。",
+    "促銷活動頻率與用戶回購率之間存在正相關關係。當品牌在節假日或會員日提供優惠時，消費者更容易形成購買習慣，提升忠誠度。",
+    "網站加載速度與用戶留存率之間有著明顯相關性。頁面加載超過3秒的網站，其用戶跳出率平均高出快速網站約40%。",
+    "天氣溫度變化與電力負載之間存在直接相關性。夏季氣溫升高時，空調負載使得電力峰值迅速上升，電網面臨更大調節壓力。",
+    "配送路徑優化程度與客戶滿意度之間存在顯著正相關。通過智慧調度算法降低配送時間，有效減少了因延遲帶來的差評和退單率。",
+    "自適應學習系統中，推薦精準度與學生學習完成率之間存在正相關。當學習內容更貼合學生水準時，用戶更容易堅持使用平台完成課程。",
+    "土壤濕度與農作物產量之間存在顯著正相關性。在精細灌溉條件下，作物吸收養分更充分，從而實現更高的畝產量。",
+    "被保人年齡與理賠發生率之間存在正相關。年齡越大的人群在健康險和人壽險中發生理賠事件的機率也越高，因此保費定價需考慮風險評估模型。",
+]
+
+# 插入数据
+with client.batch as batch:
+    for idx, paragraph in enumerate(paragraphs, start=1):
+        properties = {
+            "part_id": str(uuid.uuid4()),
+            "knowledge_id": "",
+            "file_id": "",
+            "userid": "123",
+            "username": "1234",
+            "cont_source_chn": "",
+            "nickname": "",
+            "digital_human_id": "",
+            "part_sort": idx,
+            "part_cntt": paragraph
+        }
+        vector = get_embedding(paragraph)
+        batch.add_data_object(
+            data_object=properties,
+            class_name="KnowledgeParagraph",
+            vector=vector,
+        )
+
+time.sleep(1)  # 等待索引完成
+
+# 查询数据
+full_result = client.query.get(
+    "KnowledgeParagraph",
+    ["part_id", "userid", "username", "part_sort", "part_cntt"]
+).do()
+
+from pprint import pprint
+pprint(full_result['data']['Get']['KnowledgeParagraph'])

@@ -45,7 +45,8 @@ def search_vector_in_db(query_text: str, user_ids: str, limit: int = 3):
         .get("KnowledgeParagraph",
              ["part_id", "knowledge_id", "file_id", "userid", "username",
               "digital_human_id", "part_cntt", "part_sort"])
-        .with_near_vector({"vector": embedding})
+        # .with_near_vector({"vector": embedding, "distance": 0.4})  # 越小越近
+        .with_near_vector({"vector": embedding, "certainty": 0.75}) # 越高越相似
         .with_limit(limit)
         .with_additional(["distance", "id"])
         .with_where(where_filter)
