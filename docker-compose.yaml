@@ -2,7 +2,7 @@ version: '3.9'
 
 services:
   embedding-server:
-    image: bill73777/embedding-server
+    image: bill73777/embedding-server:1.0
     ports:
       - "8888:8888"
     volumes:

@@ -46,7 +46,7 @@ def search_and_merge_full_file(query_text: str, user_ids: str, limit: int = 5):
         client.query
         .get("KnowledgeParagraph", ["file_id"])
         # .with_near_vector({"vector": embedding, "distance": 0.4})  # 越小越近
-        .with_near_vector({"vector": embedding, "certainty": 0.75}) # 越高越相似
+        .with_near_vector({"vector": embedding, "certainty": 0.6}) # 越高越相似
         .with_limit(limit)
         .with_additional(["distance"])
         .with_where(where_filter)
