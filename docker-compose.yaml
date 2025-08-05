@@ -3,6 +3,7 @@ version: '3.9'
 services:
   embedding-server:
     image: bill73777/embedding-server:1.0
+    container_name: embedding-server
     ports:
       - "8888:8888"
     volumes:
@@ -10,6 +11,16 @@ services:
     env_file:
       - .env
     restart: always
+
+    # 使用 nvidia runtime 和两张 GPU
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 2
+              capabilities: [gpu]
+
     runtime: nvidia
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_VISIBLE_DEVICES=0,1  # 指定使用 GPU 0 和 1

@@ -23,8 +23,12 @@ model_path = os.getenv("QWEN3_MODEL_PATH", r"E:\model\Qwen3-Embedding-0.6B")  # 
 tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side="left")
 # model = AutoModel.from_pretrained(model_path)
 # 模型会被放到 GPU
-model = AutoModel.from_pretrained(model_path,torch_dtype=torch.float16).cuda()
-print(model.device)
+model = AutoModel.from_pretrained(
+    model_path,
+    torch_dtype=torch.float16,
+    device_map="auto",        # ✅ 自动分配到多个 GPU
+)
+print(model.hf_device_map)
 # ✅ 转换向量函数
 def get_embedding(text: str) -> list[float]:
     """
