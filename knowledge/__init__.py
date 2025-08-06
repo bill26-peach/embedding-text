@@ -6,7 +6,11 @@ import redis
 
 # ✅ 加载 .env 文件
 load_dotenv()
-
+# ==============================
+# text len
+# ==============================
+TEXT_LENGTH = os.getenv("TEXT_LENGTH")
+CERTAINTY = os.getenv("CERTAINTY")
 # ==============================
 # Weaviate client
 # ==============================

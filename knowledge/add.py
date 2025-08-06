@@ -1,4 +1,4 @@
-from knowledge import client, redis_client, KAFKA_BOOTSTRAP_SERVERS, KAFKA_GROUP_ID, KAFKA_TOPIC
+from knowledge import client, redis_client, KAFKA_BOOTSTRAP_SERVERS, KAFKA_GROUP_ID, KAFKA_TOPIC, TEXT_LENGTH
 from embedding_model.qwen3 import get_embedding
 import weaviate  # type: ignore
 from confluent_kafka import Consumer
@@ -10,8 +10,10 @@ import threading
 
 cache_lock = threading.Lock()
 
+
 def md5_text(text: str) -> str:
     return hashlib.md5(text.encode('utf-8')).hexdigest()
+
 
 def split_text_to_paragraphs(text: str, max_len: int = 500) -> list[str]:
     paragraphs = []
@@ -26,6 +28,7 @@ def split_text_to_paragraphs(text: str, max_len: int = 500) -> list[str]:
     if temp:
         paragraphs.append(temp.strip())
     return paragraphs
+
 
 def process_and_insert(paragraph: str, meta: dict, part_sort: int):
     # 同一个文本id下的片段不需要再重复写入
@@ -65,6 +68,7 @@ def process_and_insert(paragraph: str, meta: dict, part_sort: int):
     except Exception as e:
         print("❌ 写入失败:", e)
 
+
 def consume_kafka_messages():
     consumer = Consumer({
         'bootstrap.servers': KAFKA_BOOTSTRAP_SERVERS,
@@ -103,7 +107,7 @@ def consume_kafka_messages():
             }
             content = msg_json.get("cntt", "")
 
-            paragraphs = split_text_to_paragraphs(content)
+            paragraphs = split_text_to_paragraphs(content, TEXT_LENGTH)
 
             futures = []
             with client.batch as batch:
@@ -121,6 +125,7 @@ def consume_kafka_messages():
     finally:
         consumer.close()
         executor.shutdown()
+
 
 def check_or_create_schema():
     print("Weaviate ready:", client.is_ready())
@@ -149,6 +154,7 @@ def check_or_create_schema():
         print("Schema created ✅")
     else:
         print("Schema 已存在 ✅")
+
 
 if __name__ == "__main__":
     check_or_create_schema()
