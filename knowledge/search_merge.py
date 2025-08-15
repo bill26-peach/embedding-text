@@ -1,9 +1,10 @@
 import logging
+from collections import defaultdict
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel, Field
 from knowledge import client, CERTAINTY
 from embedding_model.qwen3 import get_embedding
-from collections import defaultdict
 
 # 日志配置
 logging.basicConfig(
@@ -14,21 +15,26 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# 请求体模型
+# ====================
+# 请求体模型 + 校验
+# ====================
 class MergeQueryRequest(BaseModel):
     user_ids: str
     query_text: str
-    limit: int = 5
+    limit: int = Field(5, ge=1, le=50)
 
 class ContextQueryRequest(BaseModel):
     user_ids: str
     query_text: str
-    limit: int = 5
-    context_size: int = 1
+    limit: int = Field(5, ge=1, le=50)
+    context_size: int = Field(1, ge=0, le=5)
 
 
-# 构造 where 过滤器：用户ID
+# ====================
+# where 过滤器构造
+# ====================
 def build_userid_filter(user_ids: str):
+    """构造 where 过滤器：userid"""
     user_id_list = [uid.strip() for uid in user_ids.split(",") if uid.strip()]
     if not user_id_list:
         raise ValueError("user_ids 不能为空")
@@ -51,9 +57,8 @@ def build_userid_filter(user_ids: str):
         ]
     }
 
-
-# 构造 where 过滤器：file_id
 def build_fileid_filter(file_ids):
+    """构造 where 过滤器：file_id"""
     if not file_ids:
         return {"path": ["file_id"], "operator": "Equal", "valueString": "___empty___"}
     return {
@@ -68,65 +73,87 @@ def build_fileid_filter(file_ids):
         ]
     }
 
+def combine_and(a, b):
+    """组合 AND 条件"""
+    return {"operator": "And", "operands": [a, b]}
 
-# 安全获取查询结果
+
+# ====================
+# 工具方法
+# ====================
 def safe_get_paragraphs(result):
+    """安全获取查询结果中的段落列表"""
     return result.get("data", {}).get("Get", {}).get("KnowledgeParagraph", []) or []
 
+def ordered_unique(seq):
+    """按顺序去重"""
+    seen = set()
+    out = []
+    for x in seq:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
 
-# 查询并拼接全文（按 file_id 分组）
+
+# ====================
+# 全文合并检索（返回 file_id, user_id, context）
+# ====================
 def search_and_merge_full_file(query_text: str, user_ids: str, limit: int = 5):
-    logger.info(f"Start merging by file. query_text='{query_text}', user_ids='{user_ids}', limit={limit}")
+    logger.info(f"[merge_by_file] query_text='{query_text[:50]}...', user_ids='{user_ids}', limit={limit}")
     embedding = get_embedding(query_text)
-    where_filter = build_userid_filter(user_ids)
+    uid_where = build_userid_filter(user_ids)
 
-    logger.debug("Performing vector search...")
+    # 向量检索（取 file_id 即可）
     vector_result = (
         client.query
         .get("KnowledgeParagraph", ["file_id"])
-        .with_near_vector({"vector": embedding, "certainty": CERTAINTY})
+        .with_near_vector({"vector": embedding, "minCertainty": CERTAINTY})
         .with_limit(limit)
-        .with_additional(["distance"])
-        .with_where(where_filter)
+        .with_where(uid_where)
         .do()
     )
-    logger.debug(f"vector_result: {vector_result}")
     vector_hits = safe_get_paragraphs(vector_result)
-    file_ids = list({hit.get("file_id") for hit in vector_hits if hit.get("file_id")})
-    logger.info(f"Matched file_ids: {file_ids}")
+    file_ids = ordered_unique([h.get("file_id") for h in vector_hits if h.get("file_id")])
 
     if not file_ids:
-        logger.info("No matching file_ids found.")
+        logger.info("[merge_by_file] 无匹配文件")
         return []
 
-    logger.debug("Fetching paragraphs for matched file_ids...")
+    # 二次查询全文（带 user_id 限定，防越权），额外取 userid 字段
+    where_all = combine_and(uid_where, build_fileid_filter(file_ids))
     full_result = (
         client.query
-        .get("KnowledgeParagraph", ["file_id", "part_cntt", "part_sort"])
-        .with_where(build_fileid_filter(file_ids))
+        .get("KnowledgeParagraph", ["file_id", "userid", "part_cntt", "part_sort"])
+        .with_where(where_all)
         .with_limit(1000)
         .do()
     )
-    logger.debug(f"full_result: {full_result}")
     all_parts = safe_get_paragraphs(full_result)
-    logger.info(f"Retrieved {len(all_parts)} paragraph parts.")
 
+    # 分组并拼接，同时记录每个 file_id 的 user_id
     grouped = defaultdict(list)
+    file_user_map = {}
     for item in all_parts:
-        grouped[item["file_id"]].append({
+        fid = item.get("file_id")
+        uid = item.get("userid")
+        if fid and uid and fid not in file_user_map:
+            file_user_map[fid] = uid
+        if item.get("part_sort") is None or item.get("part_cntt") is None:
+            continue
+        grouped[fid].append({
             "part_sort": item["part_sort"],
             "part_cntt": item["part_cntt"]
         })
 
     results = []
-    for file_id in file_ids:
-        parts = sorted(grouped[file_id], key=lambda x: x["part_sort"])
-        merged_text = ''.join([p["part_cntt"] for p in parts])
-        logger.info(f"Merged file_id={file_id}, parts_count={len(parts)}")
+    for fid in file_ids:
+        parts = sorted(grouped.get(fid, []), key=lambda x: x["part_sort"])
+        merged_text = '\n'.join(p["part_cntt"] for p in parts)
         results.append({
-            "file_id": file_id,
-            "merged_text": merged_text,
-            "parts": parts
+            "file_id": fid,
+            "user_id": file_user_map.get(fid),
+            "context": merged_text
         })
 
     return results
@@ -135,69 +162,83 @@ def search_and_merge_full_file(query_text: str, user_ids: str, limit: int = 5):
 @router.post("/search_merge_by_file")
 async def search_merge_by_file(request: MergeQueryRequest):
     try:
-        merged = search_and_merge_full_file(
+        results = await run_in_threadpool(
+            search_and_merge_full_file,
             request.query_text,
             request.user_ids,
             request.limit
         )
-        return {"file_count": len(merged), "results": merged}
-    except Exception as e:
+        # 仅返回需要的字段
+        return results
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
         logger.exception("Exception in /search_merge_by_file")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="internal error")
 
 
-# 查询并拼接上下文（按段落匹配）
+# ====================
+# 上下文检索（返回 file_id, user_id, context）
+# ====================
 def handle_contextual_search(query_text: str, user_ids: str, limit: int, context_size: int):
-    logger.info(f"Start contextual search. query_text='{query_text}', user_ids='{user_ids}', limit={limit}, context_size={context_size}")
+    logger.info(f"[context_search] query_text='{query_text[:50]}...', user_ids='{user_ids}', limit={limit}, context_size={context_size}")
     embedding = get_embedding(query_text)
-    where_filter = build_userid_filter(user_ids)
+    uid_where = build_userid_filter(user_ids)
 
-    logger.debug("Performing vector search for context...")
+    # 向量检索：拿到 file_id + 命中的 part_sort
     vector_result = (
         client.query
         .get("KnowledgeParagraph", ["file_id", "part_sort"])
-        .with_near_vector({"vector": embedding, "certainty": CERTAINTY})
+        .with_near_vector({"vector": embedding, "minCertainty": CERTAINTY})
         .with_limit(limit)
-        .with_additional(["distance"])
-        .with_where(where_filter)
+        .with_where(uid_where)
         .do()
     )
-    logger.debug(f"vector_result: {vector_result}")
     hits = safe_get_paragraphs(vector_result)
     if not hits:
-        logger.info("No vector matches found.")
-        return {"match_count": 0, "results": []}
+        logger.info("[context_search] 无匹配结果")
+        return []
 
     match_map = defaultdict(set)
     for item in hits:
-        match_map[item["file_id"]].add(item["part_sort"])
-    logger.info(f"Matched file_id -> part_sort: {dict(match_map)}")
+        if item.get("file_id") and item.get("part_sort") is not None:
+            match_map[item["file_id"]].add(item["part_sort"])
 
-    file_ids = list(match_map.keys())
-    logger.debug("Fetching all paragraphs for matched file_ids...")
+    file_ids = ordered_unique(match_map.keys())
+
+    # 拉取全文（带 user_id 限定），取 userid 用于返回
+    where_all = combine_and(uid_where, build_fileid_filter(file_ids))
     full_result = (
         client.query
-        .get("KnowledgeParagraph", ["file_id", "part_sort", "part_cntt"])
-        .with_where(build_fileid_filter(file_ids))
+        .get("KnowledgeParagraph", ["file_id", "userid", "part_sort", "part_cntt"])
+        .with_where(where_all)
         .with_limit(1000)
         .do()
     )
-    logger.debug(f"full_result: {full_result}")
     all_parts = safe_get_paragraphs(full_result)
-    logger.info(f"Retrieved {len(all_parts)} paragraph parts.")
 
     file_part_map = defaultdict(list)
+    file_user_map = {}
     for item in all_parts:
-        file_part_map[item["file_id"]].append({
+        fid = item.get("file_id")
+        uid = item.get("userid")
+        if fid and uid and fid not in file_user_map:
+            file_user_map[fid] = uid
+        if item.get("part_sort") is None or item.get("part_cntt") is None:
+            continue
+        file_part_map[fid].append({
             "part_sort": item["part_sort"],
             "part_cntt": item["part_cntt"]
         })
 
     results = []
     for file_id, matched_sorts in match_map.items():
-        parts = sorted(file_part_map[file_id], key=lambda x: x["part_sort"])
+        parts = sorted(file_part_map.get(file_id, []), key=lambda x: x["part_sort"])
+        if not parts:
+            continue
         sort_index = {p["part_sort"]: i for i, p in enumerate(parts)}
 
+        # 对每个命中位置输出一个 context（如需去重或合并相邻范围，可再优化）
         for matched_sort in matched_sorts:
             idx = sort_index.get(matched_sort)
             if idx is None:
@@ -205,29 +246,31 @@ def handle_contextual_search(query_text: str, user_ids: str, limit: int, context
             start = max(0, idx - context_size)
             end = min(len(parts), idx + context_size + 1)
             context_parts = parts[start:end]
-            context_text = ''.join([p["part_cntt"] for p in context_parts])
+            context_text = '\n'.join(p["part_cntt"] for p in context_parts)
 
             results.append({
                 "file_id": file_id,
-                "matched_part_sort": matched_sort,
-                "context_range": [parts[start]["part_sort"], parts[end - 1]["part_sort"]],
-                "context_text": context_text,
-                "parts": context_parts
+                "user_id": file_user_map.get(file_id),
+                "context": context_text
             })
-        logger.info(f"Context extracted for file_id={file_id}, matched_sorts={matched_sorts}")
 
-    return {"match_count": len(results), "results": results}
+    return results
 
 
 @router.post("/search_with_context")
 async def search_with_context(request: ContextQueryRequest):
     try:
-        return handle_contextual_search(
-            query_text=request.query_text,
-            user_ids=request.user_ids,
-            limit=request.limit,
-            context_size=request.context_size
+        results = await run_in_threadpool(
+            handle_contextual_search,
+            request.query_text,
+            request.user_ids,
+            request.limit,
+            request.context_size
         )
-    except Exception as e:
+        # 仅返回需要的字段
+        return results
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))  # ←
+    except Exception:
         logger.exception("Exception in /search_with_context")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="internal error")

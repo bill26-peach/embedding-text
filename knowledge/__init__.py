@@ -9,8 +9,14 @@ load_dotenv()
 # ==============================
 # text len
 # ==============================
-TEXT_LENGTH = os.getenv("TEXT_LENGTH")
-CERTAINTY = os.getenv("CERTAINTY")
+try:
+    TEXT_LENGTH = int(os.getenv("TEXT_LENGTH", "500"))  # 默认500
+except ValueError:
+    TEXT_LENGTH = 500
+try:
+    CERTAINTY = float(os.getenv("CERTAINTY", "0.6"))
+except ValueError:
+    CERTAINTY = 0.6  # 如果 .env 中写错了，比如 CERTAINTY=abc，就使用默认值
 # ==============================
 # Weaviate client
 # ==============================
