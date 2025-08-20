@@ -110,8 +110,8 @@ def search_and_merge_full_file(query_text: str, user_ids: str, limit: int = 5, v
         vector_result = (
             client.query
             .get("KnowledgeParagraph", ["file_id"])
-            .with_near_vector({"vector": embedding, "minCertainty": CERTAINTY})
-            .with_additional(["certainty"])
+            .with_near_vector({"vector": embedding, "distance": CERTAINTY})
+            .with_additional(["certainty", "distance"])
             .with_limit(limit)
             .with_where(uid_where)
             .do()
@@ -121,7 +121,8 @@ def search_and_merge_full_file(query_text: str, user_ids: str, limit: int = 5, v
         for h in vector_hits:
             fid = h.get("file_id")
             c = (h.get("_additional") or {}).get("certainty")
-            logger.info(f"[merge_by_file] hit file_id={fid}, certainty={c}")
+            d = (h.get("_additional") or {}).get("distance")
+            logger.info(f"[merge_by_file] hit file_id={fid}, certainty={c}, distance={d}")
         file_ids = ordered_unique([h.get("file_id") for h in vector_hits if h.get("file_id")])
     else:
         # 新的非向量模式
@@ -212,8 +213,8 @@ def handle_contextual_search(query_text: str, user_ids: str, limit: int, context
     vector_result = (
         client.query
         .get("KnowledgeParagraph", ["file_id", "part_sort"])
-        .with_near_vector({"vector": embedding, "minCertainty": CERTAINTY})
-        .with_additional(["certainty"])
+        .with_near_vector({"vector": embedding, "distance": CERTAINTY})
+        .with_additional(["certainty", "distance"])
         .with_limit(limit)
         .with_where(uid_where)
         .do()
@@ -227,7 +228,8 @@ def handle_contextual_search(query_text: str, user_ids: str, limit: int, context
         fid = h.get("file_id")
         ps = h.get("part_sort")
         c = (h.get("_additional") or {}).get("certainty")
-        logger.info(f"[context_search] hit file_id={fid}, part_sort={ps}, certainty={c}")
+        d = (h.get("_additional") or {}).get("distance")
+        logger.info(f"[context_search] hit file_id={fid}, part_sort={ps}, certainty={c}, distance={d}")
 
     match_map = defaultdict(set)
     for item in hits:
