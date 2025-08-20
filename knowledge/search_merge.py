@@ -21,7 +21,8 @@ router = APIRouter()
 class MergeQueryRequest(BaseModel):
     user_ids: str
     query_text: str
-    limit: int = Field(5, ge=1, le=50)
+    limit: int = Field(5, ge=1, le=5000)
+    vector: bool = True  # 新增，默认为 True
 
 class ContextQueryRequest(BaseModel):
     user_ids: str
@@ -99,7 +100,7 @@ def ordered_unique(seq):
 # ====================
 # 全文合并检索（返回 file_id, user_id, context）
 # ====================
-def search_and_merge_full_file(query_text: str, user_ids: str, limit: int = 5):
+def search_and_merge_full_file_old(query_text: str, user_ids: str, limit: int = 5):
     logger.info(f"[merge_by_file] query_text='{query_text[:50]}...', user_ids='{user_ids}', limit={limit}")
     embedding = get_embedding(query_text)
     uid_where = build_userid_filter(user_ids)
@@ -157,7 +158,80 @@ def search_and_merge_full_file(query_text: str, user_ids: str, limit: int = 5):
         })
 
     return results
+def search_and_merge_full_file(query_text: str, user_ids: str, limit: int = 5, vector: bool = True):
+    logger.info(f"[merge_by_file] vector={vector}, uids='{user_ids}', limit={limit}")
+    uid_where = build_userid_filter(user_ids)
 
+    if vector:
+        # 原来的向量检索逻辑
+        embedding = get_embedding(query_text)
+        vector_result = (
+            client.query
+            .get("KnowledgeParagraph", ["file_id"])
+            .with_near_vector({"vector": embedding, "minCertainty": CERTAINTY})
+            .with_limit(limit)
+            .with_where(uid_where)
+            .do()
+        )
+        vector_hits = safe_get_paragraphs(vector_result)
+        file_ids = ordered_unique([h.get("file_id") for h in vector_hits if h.get("file_id")])
+    else:
+        # 新的非向量模式
+        file_ids = list_files_by_users(user_ids, limit)
+
+    if not file_ids:
+        logger.info("[merge_by_file] 无匹配文件")
+        return []
+
+    # 全文拉取并按 file_id 合并
+    where_all = combine_and(uid_where, build_fileid_filter(file_ids))
+    full_result = (
+        client.query
+        .get("KnowledgeParagraph", ["file_id", "userid", "part_cntt", "part_sort"])
+        .with_where(where_all)
+        .with_limit(5000)
+        .do()
+    )
+    all_parts = safe_get_paragraphs(full_result)
+
+    grouped = defaultdict(list)
+    file_user_map = {}
+    for item in all_parts:
+        fid = item.get("file_id")
+        uid = item.get("userid")
+        if fid and uid and fid not in file_user_map:
+            file_user_map[fid] = uid
+        if item.get("part_sort") is None or item.get("part_cntt") is None:
+            continue
+        grouped[fid].append({"part_sort": item["part_sort"], "part_cntt": item["part_cntt"]})
+
+    results = []
+    for fid in file_ids:
+        parts = sorted(grouped.get(fid, []), key=lambda x: x["part_sort"])
+        merged_text = '\n'.join(p["part_cntt"] for p in parts)
+        results.append({
+            "file_id": fid,
+            "user_id": file_user_map.get(fid),
+            "context": merged_text
+        })
+
+    return results
+
+MAX_SCAN = 5000  # 单批扫描最大段落数
+
+def list_files_by_users(user_ids: str, limit: int):
+    """按账号列出文件ID列表"""
+    uid_where = build_userid_filter(user_ids)
+    scan = (
+        client.query
+        .get("KnowledgeParagraph", ["file_id", "part_sort"])
+        .with_where(uid_where)
+        .with_limit(MAX_SCAN)  # 如果可能超量，需要分页
+        .do()
+    )
+    rows = safe_get_paragraphs(scan)
+    file_ids = ordered_unique([r.get("file_id") for r in rows if r.get("file_id")])
+    return file_ids[:limit]
 
 @router.post("/search_merge_by_file")
 async def search_merge_by_file(request: MergeQueryRequest):
@@ -166,15 +240,16 @@ async def search_merge_by_file(request: MergeQueryRequest):
             search_and_merge_full_file,
             request.query_text,
             request.user_ids,
-            request.limit
+            request.limit,
+            request.vector  # 新参数
         )
-        # 仅返回需要的字段
         return results
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception:
         logger.exception("Exception in /search_merge_by_file")
         raise HTTPException(status_code=500, detail="internal error")
+
 
 
 # ====================
