@@ -100,64 +100,6 @@ def ordered_unique(seq):
 # ====================
 # 全文合并检索（返回 file_id, user_id, context）
 # ====================
-def search_and_merge_full_file_old(query_text: str, user_ids: str, limit: int = 5):
-    logger.info(f"[merge_by_file] query_text='{query_text[:50]}...', user_ids='{user_ids}', limit={limit}")
-    embedding = get_embedding(query_text)
-    uid_where = build_userid_filter(user_ids)
-
-    # 向量检索（取 file_id 即可）
-    vector_result = (
-        client.query
-        .get("KnowledgeParagraph", ["file_id"])
-        .with_near_vector({"vector": embedding, "minCertainty": CERTAINTY})
-        .with_limit(limit)
-        .with_where(uid_where)
-        .do()
-    )
-    vector_hits = safe_get_paragraphs(vector_result)
-    file_ids = ordered_unique([h.get("file_id") for h in vector_hits if h.get("file_id")])
-
-    if not file_ids:
-        logger.info("[merge_by_file] 无匹配文件")
-        return []
-
-    # 二次查询全文（带 user_id 限定，防越权），额外取 userid 字段
-    where_all = combine_and(uid_where, build_fileid_filter(file_ids))
-    full_result = (
-        client.query
-        .get("KnowledgeParagraph", ["file_id", "userid", "part_cntt", "part_sort"])
-        .with_where(where_all)
-        .with_limit(1000)
-        .do()
-    )
-    all_parts = safe_get_paragraphs(full_result)
-
-    # 分组并拼接，同时记录每个 file_id 的 user_id
-    grouped = defaultdict(list)
-    file_user_map = {}
-    for item in all_parts:
-        fid = item.get("file_id")
-        uid = item.get("userid")
-        if fid and uid and fid not in file_user_map:
-            file_user_map[fid] = uid
-        if item.get("part_sort") is None or item.get("part_cntt") is None:
-            continue
-        grouped[fid].append({
-            "part_sort": item["part_sort"],
-            "part_cntt": item["part_cntt"]
-        })
-
-    results = []
-    for fid in file_ids:
-        parts = sorted(grouped.get(fid, []), key=lambda x: x["part_sort"])
-        merged_text = '\n'.join(p["part_cntt"] for p in parts)
-        results.append({
-            "file_id": fid,
-            "user_id": file_user_map.get(fid),
-            "context": merged_text
-        })
-
-    return results
 def search_and_merge_full_file(query_text: str, user_ids: str, limit: int = 5, vector: bool = True):
     logger.info(f"[merge_by_file] vector={vector}, uids='{user_ids}', limit={limit}")
     uid_where = build_userid_filter(user_ids)
@@ -169,11 +111,17 @@ def search_and_merge_full_file(query_text: str, user_ids: str, limit: int = 5, v
             client.query
             .get("KnowledgeParagraph", ["file_id"])
             .with_near_vector({"vector": embedding, "minCertainty": CERTAINTY})
+            .with_additional(["certainty"])
             .with_limit(limit)
             .with_where(uid_where)
             .do()
         )
         vector_hits = safe_get_paragraphs(vector_result)
+        # 打印 certainty
+        for h in vector_hits:
+            fid = h.get("file_id")
+            c = (h.get("_additional") or {}).get("certainty")
+            logger.info(f"[merge_by_file] hit file_id={fid}, certainty={c}")
         file_ids = ordered_unique([h.get("file_id") for h in vector_hits if h.get("file_id")])
     else:
         # 新的非向量模式
@@ -265,6 +213,7 @@ def handle_contextual_search(query_text: str, user_ids: str, limit: int, context
         client.query
         .get("KnowledgeParagraph", ["file_id", "part_sort"])
         .with_near_vector({"vector": embedding, "minCertainty": CERTAINTY})
+        .with_additional(["certainty"])
         .with_limit(limit)
         .with_where(uid_where)
         .do()
@@ -273,6 +222,12 @@ def handle_contextual_search(query_text: str, user_ids: str, limit: int, context
     if not hits:
         logger.info("[context_search] 无匹配结果")
         return []
+
+    for h in hits:
+        fid = h.get("file_id")
+        ps = h.get("part_sort")
+        c = (h.get("_additional") or {}).get("certainty")
+        logger.info(f"[context_search] hit file_id={fid}, part_sort={ps}, certainty={c}")
 
     match_map = defaultdict(set)
     for item in hits:
