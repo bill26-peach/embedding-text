@@ -24,3 +24,10 @@ services:
     runtime: nvidia
     environment:
       - NVIDIA_VISIBLE_DEVICES=0,1  # 指定使用 GPU 0 和 1
+
+    networks:
+      - docker_default   # 指定加入的网络
+
+networks:
+  docker_default:
+    external: true
