@@ -279,12 +279,8 @@ def get_or_create_document(userid, content):
                 "segmentation": {
                     "separator": "\n",  # 自定义分段标识符，默认为换行符
                     "max_tokens": 1000,  # 最大 token 长度，默认为 1000
+                    "chunk_overlap": 100,  # 最大 token 长度，默认为 1000
                     "parent_mode": "full-doc"  # 父分段的召回模式，选择全篇召回
-                },
-                "subchunk_segmentation": {
-                    "separator": "***",  # 子分段的分段标识符，默认为 ***
-                    "max_tokens": 500,  # 子分段最大 token 长度，通常小于父分段
-                    "chunk_overlap": 50  # 子分段重叠，段与段之间的重叠长度
                 }
             }}
         }
