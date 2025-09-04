@@ -1,4 +1,4 @@
-FROM wallies/python-cuda:3.12-cuda12.2-runtime
+FROM python:3.12-slim
 
 WORKDIR /app
 

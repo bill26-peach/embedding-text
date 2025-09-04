@@ -6,28 +6,7 @@ services:
     container_name: embedding-server
     ports:
       - "8888:8888"
-    volumes:
-      - /data/ai/models:/models
     env_file:
       - .env
     restart: always
 
-    # 使用 nvidia runtime 和两张 GPU
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 2
-              capabilities: [gpu]
-
-    runtime: nvidia
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=0,1  # 指定使用 GPU 0 和 1
-
-    networks:
-      - docker_default   # 指定加入的网络
-
-networks:
-  docker_default:
-    external: true

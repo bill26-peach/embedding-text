@@ -22,7 +22,7 @@ if __name__ == "__main__":
         "putm": "2025-06-27 13:50:01",
         "task_id": "9cf8225e230f4051b10f5090cdfc9331",
         "topic_type": "用户分享",
-        "userid": "100064602885148",
+        "userid": "1000646028851",
         "nickname": "TVBS 少康戰情室",
         "fina": r"E:\资料\数字人\zip\success\20250725\im_shared_post_fb\7_7_user_edge_9cf8225e230f4051b10f5090cdfc9331_1751276531621_65087_6_ver001_22807_1.json",
         "topic_guid": "aa37c4d753cda3000f5fcf5b65be5f8b",
