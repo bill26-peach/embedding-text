@@ -1,6 +1,4 @@
-
-
-from knowledge import  KAFKA_BOOTSTRAP_SERVERS, KAFKA_GROUP_ID, KAFKA_TOPIC
+from knowledge import KAFKA_BOOTSTRAP_SERVERS, KAFKA_GROUP_ID, KAFKA_TOPIC
 from confluent_kafka import Consumer
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -9,6 +7,11 @@ import logging
 import os
 import requests
 from .lru_cache import LRUCache
+from dotenv import load_dotenv
+
+# ✅ 加载 .env 文件
+load_dotenv()
+
 
 # =========================
 # 环境变量 & 配置
@@ -27,6 +30,7 @@ POLL_TIMEOUT = float(os.getenv("POLL_TIMEOUT", "1.0"))
 # —— 连接 Dify
 DIFY_API_URL = os.getenv("DIFY_API_URL", "http://172.23.27.133:8680/v1")
 DIFY_API_TOKEN = os.getenv("DIFY_API_TOKEN", "dataset-6uecJ0fySNjtKUkCAFkF0aZ5")
+METADATA = os.getenv("METADATA", "account")
 
 # 日志配置
 logging.basicConfig(
@@ -91,9 +95,9 @@ def create_or_get_dataset():
     log.info("使用的知识库 ID: %s", dataset_id)
     return dataset_id
 
-# 为知识库添加元数据（account）
-def update_dataset(dataset_id):
 
+# 为知识库添加元数据
+def update_dataset(dataset_id):
     headers = {"Authorization": f"Bearer {DIFY_API_TOKEN}"}
 
     data = {
@@ -128,22 +132,22 @@ def update_dataset(dataset_id):
         return None
 
 
-# 为知识库添加元数据（account）
+# 为知识库添加元数据
 def add_metadata_to_dataset(dataset_id):
     headers = {"Authorization": f"Bearer {DIFY_API_TOKEN}"}
 
-    # 为知识库添加元数据 account
+    # 为知识库添加元数据
     metadata_data = {
         "type": "string",  # 元数据类型
-        "name": "account"  # 元数据名称
+        "name": METADATA  # 元数据名称
     }
 
     response = requests.post(f"{DIFY_API_URL}/datasets/{dataset_id}/metadata", headers=headers, json=metadata_data)
 
     if response.status_code == 201:
-        log.info("为知识库 %s 添加元数据 'account' 成功", dataset_id)
+        log.info("为知识库 %s 添加元数据 %s 成功", METADATA, dataset_id)
     else:
-        log.error("为知识库 %s 添加元数据 'account' 失败: %s", dataset_id, response.text)
+        log.error("为知识库 %s 添加元数据 %s  失败: %s", METADATA, dataset_id, response.text)
 
 
 # 获取或创建知识库
@@ -255,7 +259,7 @@ def get_or_create_document(userid, content):
     document_id = None
     if document_data:
         for document in document_data:
-           if document["name"] == str(userid):
+            if document["name"] == str(userid):
                 document_id = document["id"]
                 break
     # 如果文档不存在，则创建新文档
@@ -265,7 +269,7 @@ def get_or_create_document(userid, content):
             "text": content,
             "indexing_technique": "high_quality",  # 使用高质量索引
             "doc_form": "text_model",  # 设置文档为文本模型
-            "process_rule": {"mode": "custom","rules":{
+            "process_rule": {"mode": "custom", "rules": {
                 "pre_processing_rules": [
                     {
                         "id": "remove_extra_spaces",  # 预处理规则：替换连续空格、换行符、制表符
@@ -296,10 +300,10 @@ def get_or_create_document(userid, content):
     log.info("使用的文档 ID: %s", document_id)
 
     # 获取元数据 ID
-    metadata_id = get_metadata_id(dataset_id, "account")
+    metadata_id = get_metadata_id(dataset_id, METADATA)
     if metadata_id:
-        # 更新文档的元数据 account
-        update_document_metadata(document_id, metadata_id, "account", str(userid))
+        # 更新文档的元数据
+        update_document_metadata(document_id, metadata_id, METADATA, str(userid))
 
     return document_id
 
