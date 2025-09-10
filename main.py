@@ -1,37 +1,33 @@
-import signal
-import threading
 from fastapi import FastAPI
-from knowledge.add_dify import  consume_kafka_messages
+from knowledge.add_dify import consume_kafka_messages
 from contextlib import asynccontextmanager
 import uvicorn
+from concurrent.futures import ThreadPoolExecutor
+from knowledge.add_dify import upload_worker, fragment_queue
 
-def _signal_handler(signum, frame):
-    global _running
-    print(f"收到信号 {signum}，正在请求 Kafka 消费线程退出...")
-    _running = False
+
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 绑定信号
-    signal.signal(signal.SIGINT, _signal_handler)
-    signal.signal(signal.SIGTERM, _signal_handler)
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        # 启动片段上传线程
+        for _ in range(5):
+            executor.submit(upload_worker)
+        # 启动 Kafka 消费线程
+        executor.submit(consume_kafka_messages)
 
-    t = threading.Thread(target=consume_kafka_messages, daemon=True)
-    t.start()
-    print("Kafka 消费线程已启动 ✅")
+        yield  # 让 FastAPI 可以继续启动服务
 
-    yield  # 服务运行中
-
-    # 关闭逻辑
-    print("服务关闭，等待 Kafka 消费线程退出...")
-    t.join(timeout=5)
-    print("清理完成 ✅")
+        # 优雅关闭时等待队列处理完
+        fragment_queue.join()
 
 app = FastAPI(lifespan=lifespan)
 
 @app.get("/")
 async def root():
     return {"message": "🚀 服务运行中！"}
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8888)
